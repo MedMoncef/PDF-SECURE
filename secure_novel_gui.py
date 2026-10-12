@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import queue
+import multiprocessing
 import tempfile
-import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -18,6 +18,66 @@ from secure_novel import (
 )
 
 
+def run_job(
+    input_path: Path,
+    output_dir: Path,
+    owner_password: str,
+    watermark: str,
+    cancel_event,
+    log_queue,
+) -> None:
+    gumroad_output = output_dir / "gumroad_upload.pdf"
+    private_output = output_dir / "final_secured_novel.pdf"
+
+    def report(message: str, progress: float) -> None:
+        if cancel_event.is_set():
+            raise Cancelled()
+        log_queue.put(("log", message))
+        log_queue.put(("progress", progress))
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="pdf_flatten_") as temp_dir:
+            temp_path = Path(temp_dir)
+            rasterized = temp_path / "rasterized.pdf"
+            watermarked = temp_path / "watermarked.pdf"
+            gumroad_flattened = temp_path / "gumroad_flattened.pdf"
+
+            report("Phase 1: rasterizing pages", 5)
+            page_count = rasterize_pdf(
+                input_path,
+                rasterized,
+                dpi=DPI,
+                progress_callback=lambda message, page, total: report(
+                    message,
+                    5 + 35 * page / total,
+                ),
+            )
+            report("Adding watermark to every page", 45)
+            add_watermark(rasterized, watermarked, watermark)
+            report("Phase 2: flattening watermarked pages", 55)
+            rasterize_pdf(
+                watermarked,
+                gumroad_flattened,
+                dpi=DPI,
+                progress_callback=lambda message, page, total: report(
+                    message,
+                    55 + 20 * page / total,
+                ),
+            )
+            gumroad_flattened.replace(gumroad_output)
+            verify_output(gumroad_output, page_count, encrypted=False)
+            report("Applying AES-256 permissions", 80)
+            encrypt_pdf(rasterized, private_output, owner_password)
+            verify_output(private_output, page_count, encrypted=True)
+
+        report(f"Done: {page_count} pages processed", 100)
+        log_queue.put(("success", (str(gumroad_output), str(private_output))))
+    except Cancelled:
+        log_queue.put(("cancelled", None))
+    except Exception as exc:
+        log_queue.put(("error", str(exc)))
+
+
 class SecureNovelApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -30,9 +90,9 @@ class SecureNovelApp(tk.Tk):
         self.watermark_text = tk.StringVar(value="Licensed digital copy")
         self.progress_value = tk.DoubleVar(value=0)
         self.status = tk.StringVar(value="Choose a PDF to begin.")
-        self.log_queue: queue.Queue[tuple[str, object]] = queue.Queue()
-        self.worker: threading.Thread | None = None
-        self.cancel_event = threading.Event()
+        self.log_queue = multiprocessing.Queue()
+        self.worker: multiprocessing.Process | None = None
+        self.cancel_event = multiprocessing.Event()
         self.start_button: ttk.Button
 
         self._build_ui()
@@ -176,69 +236,16 @@ class SecureNovelApp(tk.Tk):
         self._append_log(f"Output folder: {output_dir}")
         self.status.set("Working...")
         self.cancel_event.clear()
-        self.worker = threading.Thread(
-            target=self._run_worker,
+        self.worker = multiprocessing.Process(
+            target=run_job,
             args=(input_path, output_dir, owner_password, self.watermark_text.get()),
+            kwargs={
+                "cancel_event": self.cancel_event,
+                "log_queue": self.log_queue,
+            },
             daemon=True,
         )
         self.worker.start()
-
-    def _run_worker(
-        self,
-        input_path: Path,
-        output_dir: Path,
-        owner_password: str,
-        watermark: str,
-    ) -> None:
-        gumroad_output = output_dir / "gumroad_upload.pdf"
-        private_output = output_dir / "final_secured_novel.pdf"
-
-        try:
-            with tempfile.TemporaryDirectory(prefix="pdf_flatten_") as temp_dir:
-                temp_path = Path(temp_dir)
-                rasterized = temp_path / "rasterized.pdf"
-                watermarked = temp_path / "watermarked.pdf"
-                gumroad_flattened = temp_path / "gumroad_flattened.pdf"
-
-                self._step("Phase 1: rasterizing pages", 5)
-                page_count = rasterize_pdf(
-                    input_path,
-                    rasterized,
-                    dpi=DPI,
-                    progress_callback=lambda message: self._step(message, 5),
-                )
-                self._check_cancel()
-                self._step("Adding watermark to every page", 45)
-                add_watermark(rasterized, watermarked, watermark)
-                self._check_cancel()
-                self._step("Flattening watermarked pages", 55)
-                rasterize_pdf(
-                    watermarked,
-                    gumroad_flattened,
-                    dpi=DPI,
-                    progress_callback=lambda message: self._step(message, 55),
-                )
-                gumroad_flattened.replace(gumroad_output)
-                verify_output(gumroad_output, page_count, encrypted=False)
-                self._check_cancel()
-                self._step("Applying AES-256 permissions", 75)
-                encrypt_pdf(rasterized, private_output, owner_password)
-                verify_output(private_output, page_count, encrypted=True)
-
-            self._step(f"Done: {page_count} pages processed", 100)
-            self.log_queue.put(("success", (gumroad_output, private_output)))
-        except Cancelled:
-            self.log_queue.put(("cancelled", None))
-        except Exception as exc:
-            self.log_queue.put(("error", str(exc)))
-
-    def _step(self, message: str, progress: float) -> None:
-        self.log_queue.put(("log", message))
-        self.log_queue.put(("progress", progress))
-
-    def _check_cancel(self) -> None:
-        if self.cancel_event.is_set():
-            raise Cancelled()
 
     def _drain_log_queue(self) -> None:
         try:

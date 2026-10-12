@@ -43,7 +43,11 @@ def rasterize_pdf(
             if progress_callback is None:
                 print(message)
             else:
-                progress_callback(message)
+                progress_callback(
+                    message,
+                    page_number,
+                    source_pdf.page_count,
+                )
 
             # Render the page as an RGB image without transparency.
             pixmap = source_page.get_pixmap(
