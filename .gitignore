@@ -1,0 +1,33 @@
+# Python cache and tooling
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Build, test, and editor files
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.vscode/
+
+# Private manuscript and generated customer files
+input.pdf
+final_secured_novel.pdf
+rasterized.pdf
+*.epub
+*.mobi
+*.azw
+*.azw3
+
+# Temporary and local output
+tmp/
+temp/
+output/
+*.tmp
+*.log
