@@ -4,4 +4,6 @@ from secure_novel_gui import SecureNovelApp
 
 
 multiprocessing.freeze_support()
-SecureNovelApp().mainloop()
+
+if __name__ == "__main__":
+    SecureNovelApp().mainloop()
