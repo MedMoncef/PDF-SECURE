@@ -19,11 +19,15 @@ htmlcov/
 # Private manuscript and generated customer files
 input.pdf
 final_secured_novel.pdf
+gumroad_upload.pdf
 rasterized.pdf
 *.epub
 *.mobi
 *.azw
 *.azw3
+*.docx
+*.pdf
+SECURITY
 
 # Temporary and local output
 tmp/

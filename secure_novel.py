@@ -13,10 +13,17 @@ from pypdf.constants import UserAccessPermissions
 
 INPUT_FILE = Path("input.pdf")
 OUTPUT_FILE = Path("final_secured_novel.pdf")
+GUMROAD_OUTPUT_FILE = Path("gumroad_upload.pdf")
+WATERMARK_TEXT = "Licensed digital copy"
 DPI = 300
 
 
-def rasterize_pdf(input_path: Path, output_path: Path, dpi: int = 300) -> int:
+def rasterize_pdf(
+    input_path: Path,
+    output_path: Path,
+    dpi: int = 300,
+    progress_callback=None,
+) -> int:
     """
     Convert each PDF page into a high-resolution PNG image and place each
     image on a new PDF page. The resulting PDF contains no text layer.
@@ -29,10 +36,14 @@ def rasterize_pdf(input_path: Path, output_path: Path, dpi: int = 300) -> int:
         matrix = pymupdf.Matrix(scale, scale)
 
         for page_number, source_page in enumerate(source_pdf, start=1):
-            print(
+            message = (
                 f"Rasterizing page {page_number}/{source_pdf.page_count} "
                 f"at {dpi} DPI..."
             )
+            if progress_callback is None:
+                print(message)
+            else:
+                progress_callback(message)
 
             # Render the page as an RGB image without transparency.
             pixmap = source_page.get_pixmap(
@@ -62,6 +73,30 @@ def rasterize_pdf(input_path: Path, output_path: Path, dpi: int = 300) -> int:
     finally:
         flattened_pdf.close()
         source_pdf.close()
+
+
+def add_watermark(
+    input_path: Path,
+    output_path: Path,
+    watermark_text: str,
+) -> None:
+    """Add a visible watermark before the document is flattened again."""
+    document = pymupdf.open(input_path)
+
+    try:
+        for page in document:
+            page.insert_text(
+                pymupdf.Point(page.rect.width / 2, page.rect.height / 2),
+                watermark_text,
+                fontsize=24,
+                fontname="helv",
+                color=(0.45, 0.45, 0.45),
+                fill_opacity=0.28,
+            )
+
+        document.save(output_path, garbage=4, deflate=True)
+    finally:
+        document.close()
 
 
 def encrypt_pdf(
@@ -110,17 +145,29 @@ def encrypt_pdf(
         writer.write(output_stream)
 
 
-def verify_output(output_path: Path, expected_page_count: int) -> None:
-    """Perform basic checks on the generated encrypted PDF."""
+def verify_output(
+    output_path: Path,
+    expected_page_count: int,
+    *,
+    encrypted: bool,
+) -> None:
+    """Perform basic checks on a generated PDF."""
     secured_reader = PdfReader(output_path)
 
-    if not secured_reader.is_encrypted:
-        raise RuntimeError("The output PDF is not encrypted.")
+    if secured_reader.is_encrypted != encrypted:
+        expected = "encrypted" if encrypted else "unencrypted"
+        raise RuntimeError(f"{output_path} is not {expected} as expected.")
 
     if len(secured_reader.pages) != expected_page_count:
         raise RuntimeError(
             "The output PDF page count does not match the input PDF."
         )
+
+    if not encrypted:
+        if secured_reader.pages[0].extract_text():
+            raise RuntimeError(
+                f"{output_path} still contains an extractable text layer."
+            )
 
 
 def main() -> int:
@@ -161,12 +208,32 @@ def main() -> int:
     try:
         with tempfile.TemporaryDirectory(prefix="pdf_flatten_") as temp_dir:
             rasterized_path = Path(temp_dir) / "rasterized.pdf"
+            watermarked_path = Path(temp_dir) / "watermarked.pdf"
+            gumroad_flattened_path = Path(temp_dir) / "gumroad_flattened.pdf"
 
             print("\nPhase 1: Rasterization and flattening")
             page_count = rasterize_pdf(
                 INPUT_FILE,
                 rasterized_path,
                 dpi=DPI,
+            )
+
+            print("\nCreating Gumroad upload PDF")
+            add_watermark(
+                rasterized_path,
+                watermarked_path,
+                WATERMARK_TEXT,
+            )
+            rasterize_pdf(
+                watermarked_path,
+                gumroad_flattened_path,
+                dpi=DPI,
+            )
+            gumroad_flattened_path.replace(GUMROAD_OUTPUT_FILE)
+            verify_output(
+                GUMROAD_OUTPUT_FILE,
+                page_count,
+                encrypted=False,
             )
 
             print("\nPhase 2: AES-256 encryption and permissions")
@@ -176,18 +243,15 @@ def main() -> int:
                 owner_password,
             )
 
-        verify_output(OUTPUT_FILE, page_count)
+        verify_output(OUTPUT_FILE, page_count, encrypted=True)
 
         print("\nCompleted successfully.")
         print(f"Input:  {INPUT_FILE.resolve()}")
-        print(f"Output: {OUTPUT_FILE.resolve()}")
+        print(f"Gumroad: {GUMROAD_OUTPUT_FILE.resolve()}")
+        print(f"Private: {OUTPUT_FILE.resolve()}")
         print(f"Pages:  {page_count}")
-        print("User/open password: blank")
-        print("Encryption: AES-256")
-        print(
-            "Permissions: printing, copying/extraction, annotations, "
-            "and modification disabled"
-        )
+        print("Gumroad PDF: unencrypted, flattened, watermarked")
+        print("Private PDF: AES-256, blank user password, restricted permissions")
 
         return 0
 
