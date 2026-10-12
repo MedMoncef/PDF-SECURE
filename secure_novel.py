@@ -12,8 +12,9 @@ from pypdf.constants import UserAccessPermissions
 
 
 INPUT_FILE = Path("input.pdf")
-OUTPUT_FILE = Path("final_secured_novel.pdf")
-GUMROAD_OUTPUT_FILE = Path("gumroad_upload.pdf")
+OUTPUT_DIR = Path("Generated Files")
+OUTPUT_FILE = OUTPUT_DIR / "final_secured_novel.pdf"
+GUMROAD_OUTPUT_FILE = OUTPUT_DIR / "gumroad_upload.pdf"
 WATERMARK_TEXT = "Licensed digital copy"
 DPI = 300
 
@@ -210,6 +211,7 @@ def main() -> int:
         )
 
     try:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="pdf_flatten_") as temp_dir:
             rasterized_path = Path(temp_dir) / "rasterized.pdf"
             watermarked_path = Path(temp_dir) / "watermarked.pdf"

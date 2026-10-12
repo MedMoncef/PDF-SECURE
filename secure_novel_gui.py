@@ -178,7 +178,9 @@ class SecureNovelApp(tk.Tk):
         if path:
             self.source.set(path)
             if not self.output_dir.get():
-                self.output_dir.set(str(Path(path).parent))
+                generated_dir = Path(path).parent / "Generated Files"
+                generated_dir.mkdir(parents=True, exist_ok=True)
+                self.output_dir.set(str(generated_dir))
 
     def _pick_output(self):
         path = filedialog.askdirectory(title="Choose output folder")

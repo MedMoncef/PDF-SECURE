@@ -30,6 +30,7 @@ rasterized.pdf
 SECURITY
 
 # Temporary and local output
+Generated Files/
 tmp/
 temp/
 output/
